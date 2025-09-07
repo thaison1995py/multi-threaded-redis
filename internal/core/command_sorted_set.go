@@ -3,9 +3,10 @@ package core
 import (
 	"errors"
 	"fmt"
+	"strconv"
+
 	"github.com/thaison199py/multi-threaded-redis/internal/constant"
 	"github.com/thaison199py/multi-threaded-redis/internal/data_structure"
-	"strconv"
 )
 
 func cmdZADD(args []string) []byte {
@@ -51,11 +52,11 @@ func cmdZSCORE(args []string) []byte {
 	if !exist {
 		return constant.RespNil
 	}
-	ret, score := zset.GetScore(member)
-	if ret == 0 {
+	scoreVal, found := zset.GetScore(member)
+	if !found {
 		return constant.RespNil
 	}
-	return Encode(fmt.Sprintf("%f", score), false)
+	return Encode(fmt.Sprintf("%f", scoreVal), false)
 }
 
 func cmdZRANK(args []string) []byte {

@@ -2,12 +2,14 @@ package core
 
 import (
 	"errors"
-	"github.com/thaison199py/multi-threaded-redis/internal/constant"
-	"github.com/thaison199py/multi-threaded-redis/internal/data_structure"
 	"io"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/thaison199py/multi-threaded-redis/internal/constant"
+	"github.com/thaison199py/multi-threaded-redis/internal/data_structure"
 )
 
 // DecodeInt64 helper function to decode response into int64
@@ -319,9 +321,202 @@ func executeAndResponseWithWriter(cmd *Command, writer io.Writer) error {
 		res = cmdEXPIRE(cmd.Args)
 	case "EXISTS":
 		res = cmdEXISTS(cmd.Args)
+	case "CMS.INITBYDIM":
+		res = cmdCMSINITBYDIM(cmd.Args)
+	case "CMS.INITBYPROB":
+		res = cmdCMSINITBYPROB(cmd.Args)
+	case "CMS.INCRBY":
+		res = cmdCMSINCRBY(cmd.Args)
+	case "CMS.QUERY":
+		res = cmdCMSQUERY(cmd.Args)
+	case "BF.RESERVE":
+		res = cmdBFRESERVE(cmd.Args)
+	case "BF.MADD":
+		res = cmdBFMADD(cmd.Args)
+	case "BF.EXISTS":
+		res = cmdBFEXISTS(cmd.Args)
 	default:
 		res = []byte("-CMD NOT FOUND\r\n")
 	}
 	_, err := writer.Write(res)
 	return err
+}
+
+func TestCmdCMSINITBYDIM(t *testing.T) {
+	// Clear the store before each test
+	cmsStore = make(map[string]*data_structure.CMS)
+
+	// Test case 1: Valid arguments
+	res := cmdCMSINITBYDIM([]string{"mycms", "100", "5"})
+	assert.Equal(t, string(constant.RespOk), string(res))
+	assert.NotNil(t, cmsStore["mycms"])
+
+	// Test case 2: Key already exists
+	res = cmdCMSINITBYDIM([]string{"mycms", "200", "10"})
+	assert.Equal(t, string(Encode(errors.New("CMS: key already exists"), false)), string(res))
+
+	// Test case 3: Wrong number of arguments
+	res = cmdCMSINITBYDIM([]string{"mycms", "100"})
+	assert.Equal(t, string(Encode(errors.New("(error) ERR wrong number of arguments for 'CMS.INITBYDIM' command"), false)), string(res))
+
+	// Test case 4: Invalid width
+	res = cmdCMSINITBYDIM([]string{"mycms2", "abc", "5"})
+	assert.Contains(t, string(res), "width must be a integer number")
+
+	// Test case 5: Invalid height
+	res = cmdCMSINITBYDIM([]string{"mycms3", "100", "xyz"})
+	assert.Contains(t, string(res), "height must be a integer number")
+}
+
+func TestCmdCMSINITBYPROB(t *testing.T) {
+	// Clear the store before each test
+	cmsStore = make(map[string]*data_structure.CMS)
+
+	// Test case 1: Valid arguments
+	res := cmdCMSINITBYPROB([]string{"mycms", "0.01", "0.001"})
+	assert.Equal(t, string(constant.RespOk), string(res))
+	assert.NotNil(t, cmsStore["mycms"])
+
+	// Test case 2: Key already exists
+	res = cmdCMSINITBYPROB([]string{"mycms", "0.01", "0.001"})
+	assert.Equal(t, string(Encode(errors.New("CMS: key already exists"), false)), string(res))
+
+	// Test case 3: Wrong number of arguments
+	res = cmdCMSINITBYPROB([]string{"mycms", "0.01"})
+	assert.Equal(t, string(Encode(errors.New("(error) ERR wrong number of arguments for 'CMS.INITBYPROB' command"), false)), string(res))
+
+	// Test case 4: Invalid error rate (not float)
+	res = cmdCMSINITBYPROB([]string{"mycms2", "abc", "0.001"})
+	assert.Contains(t, string(res), "errRate must be a floating point number")
+
+	// Test case 5: Invalid error rate (out of range)
+	res = cmdCMSINITBYPROB([]string{"mycms3", "1.5", "0.001"})
+	assert.Contains(t, string(res), "invalid overestimation value")
+
+	// Test case 6: Invalid probability (not float)
+	res = cmdCMSINITBYPROB([]string{"mycms4", "0.01", "xyz"})
+	assert.Contains(t, string(res), "probability must be a floating poit number")
+
+	// Test case 7: Invalid probability (out of range)
+	res = cmdCMSINITBYPROB([]string{"mycms5", "0.01", "1.5"})
+	assert.Contains(t, string(res), "invalid prob value")
+}
+
+func TestCmdCMSINCRBYAndCMSQUERY(t *testing.T) {
+	// Clear the store before each test
+	cmsStore = make(map[string]*data_structure.CMS)
+
+	// Initialize a CMS filter
+	cmdCMSINITBYDIM([]string{"mycms", "100", "5"})
+
+	// Test IncrBy valid operations
+	res := cmdCMSINCRBY([]string{"mycms", "item1", "5", "item2", "10"})
+	assert.Contains(t, string(res), "5")  // Check for item1 count
+	assert.Contains(t, string(res), "10") // Check for item2 count
+
+	// Test Query valid operations
+	res = cmdCMSQUERY([]string{"mycms", "item1", "item2", "item3"})
+	assert.Contains(t, string(res), "5")  // item1 count
+	assert.Contains(t, string(res), "10") // item2 count
+	assert.Contains(t, string(res), "0")  // item3 (non-existent) count
+
+	// Test IncrBy: key does not exist
+	res = cmdCMSINCRBY([]string{"nonexistent", "item1", "5"})
+	assert.Equal(t, string(Encode(errors.New("CMS: key does not exist"), false)), string(res))
+
+	// Test Query: key does not exist
+	res = cmdCMSQUERY([]string{"nonexistent", "item1"})
+	assert.Equal(t, string(Encode(errors.New("CMS: key does not exist"), false)), string(res))
+
+	// Test IncrBy: wrong number of arguments
+	res = cmdCMSINCRBY([]string{"mycms", "item1"})
+	assert.Equal(t, string(Encode(errors.New("(error) ERR wrong number of arguments for 'CMS.INCBY' command"), false)), string(res))
+	res = cmdCMSINCRBY([]string{"mycms", "item1", "5", "item2"})
+	assert.Equal(t, string(Encode(errors.New("(error) ERR wrong number of arguments for 'CMS.INCBY' command"), false)), string(res))
+
+	// Test IncrBy: invalid increment value
+	res = cmdCMSINCRBY([]string{"mycms", "item1", "abc"})
+	assert.Contains(t, string(res), "increment must be a non negative integer number")
+
+	// Test Query: wrong number of arguments
+	res = cmdCMSQUERY([]string{"mycms"})
+	assert.Equal(t, string(Encode(errors.New("(error) ERR wrong number of arguments for 'CMS.QUERY' command"), false)), string(res))
+
+	// Test IncrBy overflow (This test case requires a large increment and might be slow or difficult to reliably simulate without a mock CMS)
+	// For now, assume IncrBy handles MaxUint32 internally, and the command correctly returns the overflow message.
+	// To properly test overflow, we'd need to mock data_structure.CMS.IncrBy to return MaxUint32.
+	// For simplicity, we'll skip direct overflow simulation for now and rely on the underlying data_structure tests.
+
+	// Example for a large increment that might cause overflow if not handled (conceptual)
+	// cmsStore["mycms"].IncrBy("large_item", math.MaxUint32 - 1)
+	// res = cmdCMSINCRBY([]string{"mycms", "large_item", "2"})
+	// assert.Contains(t, string(res), "CMS: INCRBY overflow")
+}
+
+func TestCmdBFRESERVE(t *testing.T) {
+	// Clear the store before each test
+	bloomStore = make(map[string]*data_structure.Bloom)
+
+	// Test case 1: Valid arguments
+	res := cmdBFRESERVE([]string{"mybf", "0.01", "100"})
+	assert.Equal(t, string(constant.RespOk), string(res))
+	assert.NotNil(t, bloomStore["mybf"])
+
+	// Test case 2: Key already exists
+	res = cmdBFRESERVE([]string{"mybf", "0.01", "100"})
+	assert.Contains(t, string(res), "Bloom filter with key 'mybf' already exist")
+
+	// Test case 3: Wrong number of arguments (too few)
+	res = cmdBFRESERVE([]string{"mybf2", "0.01"})
+	assert.Contains(t, string(res), "ERR wrong number of arguments for 'BF.RESERVE' command")
+
+	// Test case 4: Valid number of arguments (with unimplemented options)
+	res = cmdBFRESERVE([]string{"mybf3", "0.01", "100", "NONEXIST", "1"})
+	assert.Equal(t, string(constant.RespOk), string(res))
+
+	// Test case 5: Invalid error rate
+	res = cmdBFRESERVE([]string{"mybf4", "abc", "100"})
+	assert.Contains(t, string(res), "error rate must be a floating point number")
+
+	// Test case 6: Invalid capacity
+	res = cmdBFRESERVE([]string{"mybf5", "0.01", "xyz"})
+	assert.Contains(t, string(res), "capacity must be an integer number")
+}
+
+func TestCmdBFMADDAndBFEXISTS(t *testing.T) {
+	// Clear the store before each test
+	bloomStore = make(map[string]*data_structure.Bloom)
+
+	// Test case 1: MADD to a non-existent bloom filter (should auto-create)
+	res := cmdBFMADD([]string{"mybf", "item1", "item2"})
+	assert.Contains(t, string(res), "1")
+	assert.NotNil(t, bloomStore["mybf"])
+
+	// Verify existence
+	res = cmdBFEXISTS([]string{"mybf", "item1"})
+	assert.Equal(t, string(constant.RespOne), string(res))
+	res = cmdBFEXISTS([]string{"mybf", "item2"})
+	assert.Equal(t, string(constant.RespOne), string(res))
+	res = cmdBFEXISTS([]string{"mybf", "nonexistent"})
+	assert.Equal(t, string(constant.RespZero), string(res))
+
+	// Test case 2: MADD to an existing bloom filter
+	res = cmdBFMADD([]string{"mybf", "item3"})
+	assert.Contains(t, string(res), "1")
+
+	// Verify existence of newly added item
+	res = cmdBFEXISTS([]string{"mybf", "item3"})
+	assert.Equal(t, string(constant.RespOne), string(res))
+
+	// Test case 3: BF.EXISTS on a non-existent bloom filter
+	res = cmdBFEXISTS([]string{"nonexistentbf", "item"})
+	assert.Equal(t, string(constant.RespZero), string(res))
+
+	// Test case 4: BF.MADD wrong number of arguments
+	res = cmdBFMADD([]string{"mybf"})
+	assert.Contains(t, string(res), "ERR wrong number of arguments for 'BF.MADD' command")
+
+	// Test case 5: BF.EXISTS wrong number of arguments
+	res = cmdBFEXISTS([]string{"mybf"})
+	assert.Contains(t, string(res), "ERR wrong number of arguments for 'BF.EXISTS' command")
 }
