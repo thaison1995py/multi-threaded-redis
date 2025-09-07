@@ -13,7 +13,13 @@ func NewSortedSet(degree int) *SortedSet {
 }
 
 func (ss *SortedSet) Add(score float64, member string) int {
-	return ss.Tree.Add(score, member)
+	// Update the BPlusTree
+	added := ss.Tree.Add(score, member)
+
+	// Update the MemberScores map
+	ss.MemberScores[member] = score
+
+	return added
 }
 
 func (ss *SortedSet) GetScore(member string) (float64, bool) {
